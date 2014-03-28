@@ -1,0 +1,127 @@
+Practice with ROC Curves
+========================
+Last updated `r paste(Sys.time())` using `r R.version$version.string`.
+
+Objective
+---------
+
+> From: Jodi Lapidus  
+> Sent: Tuesday, February 25, 2014 6:08 PM  
+> To: Rajani Kaimal; Stephanie Renfro; Lorie Jacob; Jonah Todd-Geddes; Jian Shen; Ying Wang; Zunqiu Chen; Katrina Ramsey; Sheila Markwardt  
+> Subject: Practice with ROC curves - R&C  
+> 
+> This is an assignment for Rajani... but the rest of you should feel free to
+> play around with this dataset so you become familiar with the add-on modules
+> for Stata you downloaded from Pepe's site, as well as concepts we started
+> discussing last week in class.
+> 
+> * Instructions:  Attached  is a Stata data (also Excel) file that contains information on 106 women who presented in preterm labor at various clinical sites around the US.  All women were between 22 weeks (0 days) and 36 weeks (6 days) gestation at enrollment.  All  women were suspected of having an intraamniotic infection (IAI) upon enrollment. Some women in this set indeed had IAI, and others did not -- however, all women in this set were "high risk" for complications of some sort, and therefore their newborns were at risk for neonatal morbidity/mortality.   Reminder: Neonatal period = first 28 days of life. 
+> * You will examine an index of composite neonatal morbidity as an outcome variable of interest.  This is defined as described in Table 1 of the article by Mercer et al.  In the data file the field is called composite_neomorb, and 1=yes and 2=no.  You might have to recode this for some analyses, such as logistic regression. 
+> * Other data fields include a subject ID number, the gestational age at enrollment (gest_age) and at delivery (birth_age), as well as a variable that corresponds to # days between enrollment and delivery (days_dc).  All other fields are called CVFxx  where xx is just a number between 1 and 70.  These are cervical vaginal fluid (CVF) protein concentrations (log-transformed) measured at the time of entry into the study. 
+> * Your assignment is to come up with a multimarker prediction model for composite neonatal morbidity based on a subset of these 70 CVF proteins, as well as gestational age at enrollment (if it helps).   
+> * Examine the ROC curves for various combinations, as well as some of the other metrics we have discussed in class such as area under ROC, partial area under ROC, and TPF for a specific value of FPF.   Compare/contrast the results you find with ROC with the associations (odds ratios) and their tests of significance. 
+> * Summarize your methods and results in a few paragraphs along with supporting tables and figures
+
+
+Let's do this
+-------------
+
+Read Excel data file.
+
+```{r}
+f <- "cvf_neomorb.csv"
+d <- read.csv(f)
+str(d)
+```
+
+Make `Neomorb_Composite` a factor variable.
+
+```{r}
+d$Neomorb_Composite <- factor(d$Neomorb_Composite, labels=c("Yes", "No"))
+table(d$Neomorb_Composite, unclass(d$Neomorb_Composite))
+```
+
+Make a vector of variable names for the cervical vaginal fluid (CVF) protein concentration variables.
+
+```{r}
+xVarNames <- names(d)[grep("^CVF", names(d))]
+xVarNames <- c("Gest_Age", xVarNames)
+xVars <- paste(xVarNames, collapse=" + ")
+```
+
+Create a formula object to be used in the model fitting.
+
+```{r}
+f <- paste("Neomorb_Composite", xVars, sep=" ~ ")
+f <- formula(f)
+f
+```
+
+Load packages.
+
+```{r}
+packages <- c("ggplot2", "xtable", "rpart", "party", "randomForest", "pROC")
+sapply(packages, require, character.only=TRUE, quietly=TRUE)
+```
+
+Let's use CART to build a tree model.
+
+```{r}
+m1 <- rpart(f, data=d)
+printcp(m1)
+plotcp(m1)
+summary(m1)
+plot(m1, main="CART model, unpruned")
+text(m1)
+```
+
+Prune the tree.
+
+```{r}
+m1Pruned <- prune(m1, cp=m1$cptable[which.min(m1$cptable[, "xerror"]), "CP"])
+summary(m1Pruned)
+plot(m1Pruned, main="CART model, pruned")
+text(m1Pruned)
+```
+
+Let's use the `party` package to build a conditional inference tree. Pruning isn't necessary using `ctree`.
+
+```{r}
+m2 <- ctree(f, data=d)
+m2
+plot(m2, main="Conditional inference tree")
+```
+
+Let's use random forests.
+
+```{r}
+m3 <- randomForest(f, data=d)
+m3
+varImpPlot(m3)
+importance <- importance(m3)
+```
+
+Get the variables identified from the random forest with mean Gini decrease > 1.5.
+
+```{r}
+cutoff <- 1.5
+xSubset <- importance[importance > cutoff, ][order(importance[importance > cutoff, ], decreasing=TRUE)]
+xSubset
+xSubset <- names(xSubset)
+```
+
+Pass this subset of x variables to `glm`.
+
+```{r}
+f <- paste("Neomorb_Composite", paste(xSubset, collapse=" + "), sep=" ~ ")
+f <- formula(f)
+f
+m4 <- glm(f, data=d, family=binomial)
+summary(m4)
+```
+
+Plot an ROC curve.
+
+```{r}
+plot(roc(d$Neomorb_Composite, predict(m4)))
+```
