@@ -60,54 +60,34 @@ f
 Load packages.
 
 ```{r}
-packages <- c("ggplot2", "xtable", "rpart", "party", "randomForest", "pROC")
+packages <- c("randomForest", "pROC")
 sapply(packages, require, character.only=TRUE, quietly=TRUE)
 ```
 
-Let's use CART to build a tree model.
+Use a random forest to generate a set of important predictors.
 
-```{r}
-m1 <- rpart(f, data=d)
-printcp(m1)
-plotcp(m1)
-summary(m1)
-plot(m1, main="CART model, unpruned")
-text(m1)
+```{r figRandomForest}
+m1 <- randomForest(f, data=d, importance=TRUE, proximity=TRUE)
+m1
+varImpPlot(m1, main="Random forest variable importance plot")
+m1Imp <- data.frame(importance(m1))
+tail(m1Imp[order(m1Imp$MeanDecreaseAccuracy, decreasing=TRUE), ])
 ```
 
-Prune the tree.
+Find the cutoff, the *absolute value of the lowest negative-scoring variable*, [ref: Random forests for categorical dependent variables: an informal quick start R guide](http://www.stanford.edu/~stephsus/R-randomforest-guide.pdf)
 
 ```{r}
-m1Pruned <- prune(m1, cp=m1$cptable[which.min(m1$cptable[, "xerror"]), "CP"])
-summary(m1Pruned)
-plot(m1Pruned, main="CART model, pruned")
-text(m1Pruned)
+cutoff <- abs(min(m1Imp[m1Imp$MeanDecreaseAccuracy < 0, "MeanDecreaseAccuracy"]))
+cutoff
 ```
 
-Let's use the `party` package to build a conditional inference tree. Pruning isn't necessary using `ctree`.
+Get the variables identified from the random forest with mean decrease in accuracy > `r cutoff`.
 
 ```{r}
-m2 <- ctree(f, data=d)
-m2
-plot(m2, main="Conditional inference tree")
-```
-
-Let's use random forests.
-
-```{r}
-m3 <- randomForest(f, data=d)
-m3
-varImpPlot(m3)
-importance <- importance(m3)
-```
-
-Get the variables identified from the random forest with mean Gini decrease > 1.5.
-
-```{r}
-cutoff <- 1.5
-xSubset <- importance[importance > cutoff, ][order(importance[importance > cutoff, ], decreasing=TRUE)]
+xSubset <- m1Imp[m1Imp$MeanDecreaseAccuracy > cutoff, ]
+xSubset <- xSubset[order(xSubset$MeanDecreaseAccuracy, decreasing=TRUE), ]
 xSubset
-xSubset <- names(xSubset)
+xSubset <- rownames(xSubset)
 ```
 
 Pass this subset of x variables to `glm`.
@@ -116,12 +96,12 @@ Pass this subset of x variables to `glm`.
 f <- paste("Neomorb_Composite", paste(xSubset, collapse=" + "), sep=" ~ ")
 f <- formula(f)
 f
-m4 <- glm(f, data=d, family=binomial)
-summary(m4)
+m2 <- glm(f, data=d, family=binomial)
+summary(m2)
 ```
 
 Plot an ROC curve.
 
-```{r}
-plot(roc(d$Neomorb_Composite, predict(m4)))
+```{r figROC}
+plot(roc(d$Neomorb_Composite, predict(m2)), main="ROC curve")
 ```
